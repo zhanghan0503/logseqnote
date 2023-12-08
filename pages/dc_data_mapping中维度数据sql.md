@@ -1,0 +1,57 @@
+- 练习
+	- select * from DC_DATA_MAPPING where ODS_TAB ='ODS_HAFOIS_PMLSHT' and DWD_TAB ='DWD_TR_DKFF' AND DWD_COL ='DKFFE'
+	- select * from DWS_2.DWS_ZB_10003
+	- select * from META_ADS_ZB where ZBBM='10004' and TABLE_NAME = 'ADS_SD_YWGLLHJY' and COLUMN_NAME = 'YHDKBS'
+	- select * from META_STD_ZB_DIM where ZBDM = '10004'
+	- --ADS_SD_YWGLLHJY\YHDKBS.LHJYDKFDBS
+	- FZX,JCRYLB,QCLC,DKCS,DKYT,DKSQLX,HJFL,NLDC,DKNXFL,JZMJJC,YDDK,YHZGDX
+	- LHJYDKFDBS，YHDKBS
+	  -- 拆出维度，可以存一张临时表，id+zbbm+wd
+	- SELECT *,
+	- TRIM(SUBSTR('1,'|| WDDM|| ',',
+	- INSTR('1,'|| WDDM || ',', ',', 1, LEVEL) + 1,
+	  INSTR('1,'|| WDDM || ',', ',', 1, LEVEL + 1) - INSTR('1,'|| WDDM || ',', ',', 1, LEVEL) - 1)) AS value
+	- FROM META_STD_ZB_DIM
+	- WHERE ZBDM = '10003'
+	- CONNECT BY PRIOR ZBDM = ZBDM
+	- AND PRIOR SYS_GUID() IS NOT NULL
+	  AND LEVEL <= LENGTH(WDDM) - LENGTH(REPLACE(WDDM, ',')) + 1;
+	- ---字段13条，每个维度12条，一共增加156
+	- select * from DC_DATA_MAPPING a where a.ODS_TAB ='ODS_HAFOIS_PMLSHT' and a.DWD_TAB ='DWD_TR_DKFF' and a.DWS_TAB IS NOT NULL GROUP BY ADS_COL
+- 流程：
+	- --在data_mapping中插入维度信息，DWS_COL为维度信息，其他不变
+	  -- 通过select * from META_ADS_ZB where ZBBM='10004' and TABLE_NAME = 'ADS_SD_YWGLLHJY' and COLUMN_NAME = 'YHDKBS'查询结果，
+	- --TJWD_NAME1判断是否需要插入
+	- --拿到指定DWD表的指标编码、ADS表名、ADS的列名
+	- select DISTINCT SUBSTR(DWS_TAB,LENGTH('DWS_ZB_')+1) as ZBBM,DWD_TAB,DWD_COL, ADS_TAB,ADS_COL
+	- from DC_DATA_MAPPING where ODS_TAB ='ODS_HAFOIS_PMLSHT' and DWD_TAB ='DWD_TR_DKFF' and DWS_TAB IS NOT NULL
+	  -- 不判断直接插入
+	  -- Step1.查询WD，并且分解WD，可以存一张临时表temp_DWS_WD,可以存一张临时表，id+zbbm+wd
+	- CREATE TABLE temp_DWS_WD AS
+	- SELECT DISTINCT
+	- TRIM(SUBSTR('1,'|| WDDM|| ',',
+	- INSTR('1,'|| WDDM || ',', ',', 1, LEVEL) + 1,
+	  INSTR('1,'|| WDDM || ',', ',', 1, LEVEL + 1) - INSTR('1,'|| WDDM || ',', ',', 1, LEVEL) - 1)) AS WD,ZBDM,TO_CHAR(ROWNUM) as id
+	- FROM META_STD_ZB_DIM
+	- WHERE ZBDM in (
+	- select DISTINCT SUBSTR(DWS_TAB,LENGTH('DWS_ZB_')+1) from DC_DATA_MAPPING
+	- where ODS_TAB ='ODS_HAFOIS_PMLSHT' and DWD_TAB ='DWD_TR_DKFF' and DWS_TAB IS NOT NULL)
+	- CONNECT BY PRIOR ZBDM = ZBDM
+	- AND PRIOR SYS_GUID() IS NOT NULL
+	  AND LEVEL <= LENGTH(WDDM) - LENGTH(REPLACE(WDDM, ',')) + 1;
+	  -- Step2.整合数据插入dc_data_mapping。不用修改原来的数据，直接插入新数据
+	- insert into DC_DATA_MAPPING (id,YWC_DB,YWC_TAB,YWC_COL,ODS_TAB,ODS_COL,STD_TAB,STD_COL,STD_STDCODE,DWD_TAB,DWD_COL,DWD_STDCODE,DWS_TAB,DWS_COL,DWS_STDCODE,ADS_TAB,ADS_COL)
+	- SELECT
+	- TO_CHAR(TO_NUMBER((SELECT MAX(TO_NUMBER(id)) FROM DC_DATA_MAPPING), '999999')+ ROWNUM) as id,
+	- a.YWC_DB, a.YWC_TAB, a.YWC_COL,
+	- a.ODS_TAB, a.ODS_COL,
+	- a.STD_TAB, a.STD_COL, a.STD_STDCODE,
+	- a.DWD_TAB, a.DWD_COL, a.DWD_STDCODE,
+	- a.DWS_TAB,
+	- b.WD as DWS_COL,null,
+	- a.ADS_TAB, a.ADS_COL
+	- from DC_DATA_MAPPING a
+	- JOIN temp_DWS_WD b ON SUBSTR(a.DWS_TAB,LENGTH('DWS_ZB_')+1) = b.ZBDM
+	- where a.ODS_TAB ='ODS_HAFOIS_PMLSHT' and a.DWD_TAB ='DWD_TR_DKFF' and a.DWS_TAB IS NOT NULL
+	- select * from temp_DWS_WD
+	- delete from DC_DATA_MAPPING where ODS_TAB ='ODS_HAFOIS_PMLSHT' and DWD_TAB ='DWD_TR_DKFF' and DWS_COL in (select WD from temp_DWS_WD)
