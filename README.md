@@ -1,0 +1,2 @@
+# logseqnote
+note
